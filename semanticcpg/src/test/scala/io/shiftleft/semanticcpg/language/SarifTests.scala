@@ -22,8 +22,8 @@ class SarifTests extends AnyWordSpec with Matchers {
       run.results shouldBe Nil
       val tool = run.tool.driver
       tool.name shouldBe "Joern"
-      tool.fullName shouldBe "Joern - The Bug Hunter's Workbench"
-      tool.organization shouldBe "Joern.io"
+      tool.fullName shouldBe Option("Joern - The Bug Hunter's Workbench")
+      tool.organization shouldBe Option("Joern.io")
     }
   }
 
@@ -34,13 +34,25 @@ class SarifTests extends AnyWordSpec with Matchers {
     createValidFindingNode(cpg)
 
     "create a valid SARIF result" in {
-      val sarif   = cpg.finding.toSarif()
-      val results = sarif.runs.head.results
+      val sarif = cpg.finding.toSarif()
+      val run   = sarif.runs.head
+      val rules = run.tool.driver.rules
+
+      rules.size shouldBe 1
+      val rule = rules.head
+      rule.id shouldBe "f1"
+      rule.name shouldBe "Rule 1"
+      rule.shortDescription shouldBe None
+      rule.fullDescription.map(_.text) shouldBe Some("something bad happened")
+      rule.helpUri shouldBe None
+
+      val results = run.results
       results.size shouldBe 1
+
       val result = results.head
 
       result.ruleId shouldBe "f1"
-      result.message.text shouldBe "Finding 1"
+      result.message.text shouldBe "Rule 1"
       result.level shouldBe "error"
 
       val region = result.locations.head.physicalLocation.region
@@ -52,7 +64,7 @@ class SarifTests extends AnyWordSpec with Matchers {
       artifactLocation.uri.map(_.toString) shouldBe Some("Bar.java")
 
       result.codeFlows.size shouldBe 1
-      result.codeFlows.head.message.text shouldBe "something bad happened"
+      result.codeFlows.head.message shouldBe None
     }
 
     "create a valid SARIF JSON" in {
@@ -64,20 +76,23 @@ class SarifTests extends AnyWordSpec with Matchers {
           |    {
           |      "tool":{
           |        "driver":{
-          |          "name":"Joern",
-          |          "fullName":"Joern - The Bug Hunter's Workbench",
           |          "organization":"Joern.io",
-          |          "semanticVersion":"0.0.1",
-          |          "informationUri":"https://joern.io"
+          |          "name":"Joern",
+          |          "informationUri":"https://joern.io",
+          |          "fullName":"Joern - The Bug Hunter's Workbench",
+          |          "rules":[
+          |            {
+          |              "id":"f1",
+          |              "name":"Rule 1",
+          |              "fullDescription":{
+          |                "text":"something bad happened"
+          |              }
+          |            }
+          |          ]
           |        }
           |      },
           |      "results":[
           |        {
-          |          "ruleId":"f1",
-          |          "message":{
-          |            "text":"Finding 1"
-          |          },
-          |          "level":"error",
           |          "locations":[
           |            {
           |              "physicalLocation":{
@@ -110,11 +125,11 @@ class SarifTests extends AnyWordSpec with Matchers {
           |              }
           |            }
           |          ],
+          |          "message":{
+          |            "text":"Rule 1"
+          |          },
           |          "codeFlows":[
           |            {
-          |              "message":{
-          |                "text":"something bad happened"
-          |              },
           |              "threadFlows":[
           |                {
           |                  "locations":[
@@ -138,7 +153,9 @@ class SarifTests extends AnyWordSpec with Matchers {
           |                }
           |              ]
           |            }
-          |          ]
+          |          ],
+          |          "ruleId":"f1",
+          |          "level":"error"
           |        }
           |      ],
           |      "originalUriBaseIds":{
@@ -149,6 +166,7 @@ class SarifTests extends AnyWordSpec with Matchers {
           |    }
           |  ]
           |}
+          |
           |""".stripMargin.trim
     }
 
@@ -161,8 +179,19 @@ class SarifTests extends AnyWordSpec with Matchers {
     createInvalidFindingNode(cpg)
 
     "create a valid SARIF result" in {
-      val sarif   = cpg.finding.toSarif()
-      val results = sarif.runs.head.results
+      val sarif = cpg.finding.toSarif()
+      val run   = sarif.runs.head
+      val rules = run.tool.driver.rules
+
+      rules.size shouldBe 1
+      val rule = rules.head
+      rule.id shouldBe "f1"
+      rule.name shouldBe "<empty>"
+      rule.shortDescription shouldBe None
+      rule.fullDescription.map(_.text) shouldBe Some("something bad happened")
+      rule.helpUri shouldBe None
+
+      val results = run.results
       results.size shouldBe 1
       val result = results.head
 
@@ -179,7 +208,7 @@ class SarifTests extends AnyWordSpec with Matchers {
       artifactLocation.uri.map(_.toString) shouldBe None
 
       result.codeFlows.size shouldBe 1
-      result.codeFlows.head.message.text shouldBe "something bad happened"
+      result.codeFlows.head.message shouldBe None
     }
 
     "create a valid SARIF JSON" in {
@@ -192,20 +221,23 @@ class SarifTests extends AnyWordSpec with Matchers {
           |    {
           |      "tool":{
           |        "driver":{
-          |          "name":"Joern",
-          |          "fullName":"Joern - The Bug Hunter's Workbench",
           |          "organization":"Joern.io",
-          |          "semanticVersion":"0.0.1",
-          |          "informationUri":"https://joern.io"
+          |          "name":"Joern",
+          |          "informationUri":"https://joern.io",
+          |          "fullName":"Joern - The Bug Hunter's Workbench",
+          |          "rules":[
+          |            {
+          |              "id":"f1",
+          |              "name":"<empty>",
+          |              "fullDescription":{
+          |                "text":"something bad happened"
+          |              }
+          |            }
+          |          ]
           |        }
           |      },
           |      "results":[
           |        {
-          |          "ruleId":"f1",
-          |          "message":{
-          |            "text":"<empty>"
-          |          },
-          |          "level":"warning",
           |          "locations":[
           |            {
           |              "physicalLocation":{
@@ -236,11 +268,11 @@ class SarifTests extends AnyWordSpec with Matchers {
           |              }
           |            }
           |          ],
+          |          "message":{
+          |            "text":"<empty>"
+          |          },
           |          "codeFlows":[
           |            {
-          |              "message":{
-          |                "text":"something bad happened"
-          |              },
           |              "threadFlows":[
           |                {
           |                  "locations":[
@@ -263,7 +295,9 @@ class SarifTests extends AnyWordSpec with Matchers {
           |                }
           |              ]
           |            }
-          |          ]
+          |          ],
+          |          "ruleId":"f1",
+          |          "level":"warning"
           |        }
           |      ],
           |      "originalUriBaseIds":{
@@ -295,7 +329,7 @@ object SarifTests {
       .keyValuePairs(
         List(
           NewKeyValuePair().key("name").value("f1"),
-          NewKeyValuePair().key("title").value("Finding 1"),
+          NewKeyValuePair().key("title").value("Rule 1"),
           NewKeyValuePair().key("description").value("something bad happened"),
           NewKeyValuePair().key("score").value("8.0")
         )

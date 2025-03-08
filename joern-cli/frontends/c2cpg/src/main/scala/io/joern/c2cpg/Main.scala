@@ -16,7 +16,6 @@ final case class Config(
   printIfDefsOnly: Boolean = false,
   includePathsAutoDiscovery: Boolean = false,
   skipFunctionBodies: Boolean = false,
-  noImageLocations: Boolean = false,
   withPreprocessedFiles: Boolean = false,
   compilationDatabase: Option[String] = None
 ) extends X2CpgConfig[Config] {
@@ -50,10 +49,6 @@ final case class Config(
 
   def withSkipFunctionBodies(value: Boolean): Config = {
     this.copy(skipFunctionBodies = value).withInheritedFields(this)
-  }
-
-  def withNoImageLocations(value: Boolean): Config = {
-    this.copy(noImageLocations = value).withInheritedFields(this)
   }
 
   def withPreprocessedFiles(value: Boolean): Config = {
@@ -99,10 +94,8 @@ private object Frontend {
         .text("instructs the parser to skip function and method bodies.")
         .action((_, c) => c.withSkipFunctionBodies(true)),
       opt[Unit]("no-image-locations")
-        .text("""performance optimization, allows the parser not to create image-locations.
-            | An image location explains how a name made it into the translation unit.
-            | E.g., via macro expansion or preprocessor.""".stripMargin)
-        .action((_, c) => c.withNoImageLocations(true)),
+        // deprecated, won't be removed for now to avoid breaking existing scripts
+        .hidden(),
       opt[Unit]("with-preprocessed-files")
         .text("includes *.i files and gives them priority over their unprocessed origin source files.")
         .action((_, c) => c.withPreprocessedFiles(true)),
@@ -125,8 +118,6 @@ private object Frontend {
 
 object Main extends X2CpgMain(cmdLineParser, new C2Cpg()) with FrontendHTTPServer[Config, C2Cpg] {
 
-  override protected def newDefaultConfig(): Config = Config()
-
   override def run(config: Config, c2cpg: C2Cpg): Unit = {
     config match {
       case c if c.serverMode      => startup()
@@ -134,5 +125,7 @@ object Main extends X2CpgMain(cmdLineParser, new C2Cpg()) with FrontendHTTPServe
       case _                      => c2cpg.run(config)
     }
   }
+
+  override protected def newDefaultConfig(): Config = Config()
 
 }

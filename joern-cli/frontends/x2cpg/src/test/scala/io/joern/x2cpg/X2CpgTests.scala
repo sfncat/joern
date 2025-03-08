@@ -1,6 +1,8 @@
 package io.joern.x2cpg
 
 import better.files.File
+import io.joern.x2cpg.utils.FileUtil
+import io.joern.x2cpg.utils.FileUtil.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -17,24 +19,24 @@ class X2CpgTests extends AnyWordSpec with Matchers {
     }
 
     "create file if it does not exist" in {
-      val file = File.newTemporaryFile("x2cpg")
-      file.delete()
-      file.exists shouldBe false
-      val cpg = X2Cpg.newEmptyCpg(Some(file.path.toString))
+      val file = FileUtil.newTemporaryFile("x2cpg")
+      FileUtil.delete(file)
+      Files.exists(file) shouldBe false
+      val cpg = X2Cpg.newEmptyCpg(Some(file.toString))
       cpg.close()
-      file.exists shouldBe true
-      Files.size(file.path) should not be 0
+      Files.exists(file) shouldBe true
+      Files.size(file) should not be 0
     }
 
     "overwrite existing file to create empty CPG" in {
-      File.usingTemporaryFile("x2cpg") { file =>
-        file.exists shouldBe true
-        Files.size(file.path) shouldBe 0
-        val cpg = X2Cpg.newEmptyCpg(Some(file.path.toString))
+      FileUtil.usingTemporaryFile("x2cpg") { file =>
+        Files.exists(file) shouldBe true
+        Files.size(file) shouldBe 0
+        val cpg = X2Cpg.newEmptyCpg(Some(file.toString))
         cpg.graph.allNodes.hasNext shouldBe false
         cpg.close()
-        file.exists shouldBe true
-        Files.size(file.path) should not be 0
+        Files.exists(file) shouldBe true
+        Files.size(file) should not be 0
       }
     }
   }

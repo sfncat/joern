@@ -1,36 +1,14 @@
 package io.joern.x2cpg
 
 import io.joern.x2cpg.AstNodeBuilder.methodReturnNodeWithExplicitPositionInfo
-import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EvaluationStrategies}
+import io.shiftleft.codepropertygraph.generated.DispatchTypes
+import io.shiftleft.codepropertygraph.generated.EvaluationStrategies
+import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.nodes.Block.PropertyDefaults as BlockDefaults
-import io.shiftleft.codepropertygraph.generated.nodes.{
-  NewAnnotation,
-  NewAnnotationLiteral,
-  NewBinding,
-  NewBlock,
-  NewCall,
-  NewControlStructure,
-  NewFieldIdentifier,
-  NewIdentifier,
-  NewImport,
-  NewJumpTarget,
-  NewLiteral,
-  NewLocal,
-  NewMember,
-  NewMethod,
-  NewMethodParameterIn,
-  NewMethodRef,
-  NewMethodReturn,
-  NewModifier,
-  NewNamespaceBlock,
-  NewReturn,
-  NewTypeDecl,
-  NewTypeRef,
-  NewUnknown
-}
 import org.apache.commons.lang3.StringUtils
 
 import scala.util.Try
+
 trait AstNodeBuilder[Node, NodeProcessor] { this: NodeProcessor =>
   protected def line(node: Node): Option[Int]
   protected def column(node: Node): Option[Int]
@@ -73,6 +51,10 @@ trait AstNodeBuilder[Node, NodeProcessor] { this: NodeProcessor =>
       .code(name)
       .lineNumber(line(node))
       .columnNumber(column(node))
+  }
+
+  protected def commentNode(node: Node, code: String, filename: String): NewComment = {
+    NewComment().code(code).filename(filename).lineNumber(line(node)).columnNumber(column(node))
   }
 
   protected def methodRefNode(node: Node, code: String, methodFullName: String, typeFullName: String): NewMethodRef = {
@@ -386,6 +368,13 @@ trait AstNodeBuilder[Node, NodeProcessor] { this: NodeProcessor =>
       .lineNumber(line(node))
       .columnNumber(column(node))
   }
+
+  protected def modifierNode(node: Node, modifierType: String): NewModifier = {
+    NewModifier()
+      .modifierType(modifierType)
+      .lineNumber(line(node))
+      .columnNumber(column(node))
+  }
 }
 
 /** It is sometimes necessary to create nodes without an origin node to use as a reference for positional information
@@ -435,5 +424,30 @@ object AstNodeBuilder {
       .columnNumber(columnNumber)
       .offset(offset)
       .offsetEnd(offsetEnd)
+  }
+
+  private[joern] def bindingNode(name: String, signature: String, methodFullName: String): NewBinding = {
+    NewBinding()
+      .name(name)
+      .methodFullName(methodFullName)
+      .signature(signature)
+  }
+
+  private[joern] def closureBindingNode(
+    closureBindingId: String,
+    originalName: String,
+    evaluationStrategy: String
+  ): NewClosureBinding = {
+    NewClosureBinding()
+      .closureBindingId(closureBindingId)
+      .closureOriginalName(originalName)
+      .evaluationStrategy(evaluationStrategy)
+  }
+
+  private[joern] def dependencyNode(name: String, groupId: String, version: String): NewDependency = {
+    NewDependency()
+      .name(name)
+      .dependencyGroupId(groupId)
+      .version(version)
   }
 }

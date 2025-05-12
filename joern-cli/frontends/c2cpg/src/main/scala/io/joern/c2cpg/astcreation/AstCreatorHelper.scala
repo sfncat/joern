@@ -1,19 +1,14 @@
 package io.joern.c2cpg.astcreation
 
-import io.joern.c2cpg.astcreation.C2CpgScope.PendingReference
 import io.joern.c2cpg.passes.FunctionDeclNodePass
 import io.joern.x2cpg.Ast
 import io.joern.x2cpg.AstNodeBuilder
-import io.joern.x2cpg.AstNodeBuilder.closureBindingNode
 import io.joern.x2cpg.AstNodeBuilder.dependencyNode
 import io.joern.x2cpg.SourceFiles
-import io.joern.x2cpg.utils.IntervalKeyPool
 import io.shiftleft.codepropertygraph.generated.nodes.ExpressionNew
 import io.shiftleft.codepropertygraph.generated.nodes.NewCall
 import io.shiftleft.codepropertygraph.generated.nodes.NewNode
 import io.shiftleft.codepropertygraph.generated.EdgeTypes
-import io.shiftleft.codepropertygraph.generated.nodes.NewIdentifier
-import io.shiftleft.codepropertygraph.generated.nodes.NewLocal
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.c.ICASTArrayDesignator
 import org.eclipse.cdt.core.dom.ast.c.ICASTDesignatedInitializer
@@ -29,8 +24,8 @@ import scala.util.Try
 
 trait AstCreatorHelper { this: AstCreator =>
 
-  private val fileLocalNameKeyPool         = new IntervalKeyPool(first = 0, last = Long.MaxValue)
-  private val file2OffsetTable: Array[Int] = genFileOffsetTable()
+  private val scopeLocalUniqueNames: mutable.Map[String, Int] = mutable.HashMap.empty
+  private val file2OffsetTable: Array[Int]                    = genFileOffsetTable()
 
   // We use our own call ast creation function since the version in x2cpg treats
   // base as receiver if no receiver is given which does not fit the needs of this
@@ -68,12 +63,20 @@ trait AstCreatorHelper { this: AstCreator =>
     ast
   }
 
-  protected def fileLocalUniqueName(name: String, fullName: String, targetName: String = ""): (String, String) = {
+  protected def scopeLocalUniqueName(targetName: String, fullName: String = ""): String = {
+    val name = if (targetName.isEmpty) { "<anonymous>" }
+    else { s"<$targetName>" }
+    val scopePath = if (fullName.isEmpty) { scope.computeScopePath }
+    else { fullName.stripSuffix(".") }
+    val key = s"$scopePath:$name"
+    val idx = scopeLocalUniqueNames.getOrElseUpdate(key, 0)
+    scopeLocalUniqueNames.update(key, idx + 1)
+    s"$name$idx"
+  }
+
+  protected def scopeLocalUniqueName(name: String, fullName: String, targetName: String): (String, String) = {
     if (name.isEmpty && (fullName.isEmpty || fullName.endsWith("."))) {
-      val newName = targetName match {
-        case ""    => s"<anonymous>${fileLocalNameKeyPool.next}"
-        case other => s"<$other>${fileLocalNameKeyPool.next}"
-      }
+      val newName           = scopeLocalUniqueName(targetName, fullName)
       val resultingFullName = s"$fullName$newName"
       (newName, resultingFullName)
     } else {
@@ -92,18 +95,6 @@ trait AstCreatorHelper { this: AstCreator =>
     val tableIndex      = if index < 0 then -(index + 1) else index + 1
     val lineStartOffset = if tableIndex == 0 then 0 else file2OffsetTable(tableIndex - 1)
     offset - lineStartOffset + 1
-  }
-
-  private def genFileOffsetTable(): Array[Int] = {
-    cdtAst.getRawSignature.toCharArray.zipWithIndex.collect { case ('\n', idx) => idx + 1 }
-  }
-
-  protected def fileName(node: IASTNode): String = {
-    val path = Try(node.getContainingFilename) match {
-      case Success(value) if value.nonEmpty => value
-      case _                                => filename
-    }
-    SourceFiles.toRelativePath(path, config.inputPath)
   }
 
   protected def registerType(typeName: String): String = {
@@ -132,16 +123,16 @@ trait AstCreatorHelper { this: AstCreator =>
     }
   }
 
-  protected def safeGetBinding(name: IASTName): Option[IBinding] = {
-    // In case of unresolved includes etc. this may fail throwing an unrecoverable exception
-    Try(name.resolveBinding()).toOption.filter(_ != null)
-  }
-
   protected def safeGetBinding(spec: IASTNamedTypeSpecifier): Option[IBinding] = {
     // In case of unresolved includes etc. this may fail throwing an unrecoverable exception
     safeGetBinding(spec.getName).collect {
       case binding: IBinding if !binding.isInstanceOf[IProblemBinding] => binding
     }
+  }
+
+  protected def safeGetBinding(name: IASTName): Option[IBinding] = {
+    // In case of unresolved includes etc. this may fail throwing an unrecoverable exception
+    Try(name.resolveBinding()).toOption.filter(_ != null)
   }
 
   protected def notHandledYet(node: IASTNode): Ast = {
@@ -191,14 +182,22 @@ trait AstCreatorHelper { this: AstCreator =>
     }
   }
 
-  protected def isIncludedNode(node: IASTNode): Boolean = fileName(node) != filename
-
   protected def astsForComments(iASTTranslationUnit: IASTTranslationUnit): Seq[Ast] = {
     if (config.includeComments) {
       iASTTranslationUnit.getComments.toList.filterNot(isIncludedNode).map(comment => astForComment(comment))
     } else {
       Seq.empty
     }
+  }
+
+  protected def isIncludedNode(node: IASTNode): Boolean = fileName(node) != filename
+
+  protected def fileName(node: IASTNode): String = {
+    val path = Try(node.getContainingFilename) match {
+      case Success(value) if value.nonEmpty => value
+      case _                                => filename
+    }
+    SourceFiles.toRelativePath(path, config.inputPath)
   }
 
   protected def astForNode(node: IASTNode): Ast = {
@@ -223,81 +222,8 @@ trait AstCreatorHelper { this: AstCreator =>
     }
   }
 
-  protected def createVariableReferenceLinks(): Unit = {
-    val resolvedReferences = scope.resolve(createLocalForUnresolvedReference)
-    val capturedLocals     = mutable.HashMap.empty[String, NewNode]
-
-    resolvedReferences.foreach { case C2CpgScope.ResolvedReference(variableNodeId, origin) =>
-      var maybeScopeElement      = origin.stack
-      var currentReference       = origin.referenceNode
-      var nextReference: NewNode = null
-      var done                   = false
-      while (!done) {
-        val localOrCapturedLocalNodeOption =
-          if (maybeScopeElement.exists(_.nameToVariableNode.contains(origin.variableName))) {
-            done = true
-            Option(variableNodeId)
-          } else {
-            maybeScopeElement.flatMap {
-              case methodScope: C2CpgScope.MethodScopeElement if methodScope.needsEnclosingScope =>
-                maybeScopeElement = scope.getEnclosingMethodScopeElement(maybeScopeElement)
-                None
-              case methodScope: C2CpgScope.MethodScopeElement =>
-                val id = s"$filename:${methodScope.methodName}:${origin.variableName}"
-                capturedLocals.updateWith(id) {
-                  case None =>
-                    val closureBinding = closureBindingNode(id, origin.variableName, origin.evaluationStrategy)
-                    methodScope.capturingRefId.foreach(diffGraph.addEdge(_, closureBinding, EdgeTypes.CAPTURE))
-                    nextReference = closureBinding
-                    val localNode = createLocalForUnresolvedReference(methodScope.scopeNode, origin)
-                    Option(localNode.closureBindingId(id))
-                  case someLocalNode =>
-                    // When there is already a LOCAL representing the capturing, we do not
-                    // need to process the surrounding scope element as this has already
-                    // been processed.
-                    done = true
-                    someLocalNode
-                }
-              case _ => None
-            }
-          }
-
-        localOrCapturedLocalNodeOption.foreach { localOrCapturedLocalNode =>
-          (currentReference, localOrCapturedLocalNode) match {
-            case (id: NewIdentifier, local: NewLocal) => transferLineAndColumnInfo(id, local)
-            case _                                    => // do nothing
-          }
-          diffGraph.addEdge(currentReference, localOrCapturedLocalNode, EdgeTypes.REF)
-          currentReference = nextReference
-        }
-        maybeScopeElement = maybeScopeElement.flatMap(_.surroundingScope)
-      }
-    }
-  }
-
-  private def transferLineAndColumnInfo(src: NewIdentifier, target: NewLocal): Unit = {
-    src.lineNumber match {
-      // If there are multiple occurrences and the local is already set, ignore later updates
-      case Some(srcLineNo) if target.lineNumber.isEmpty || !target.lineNumber.exists(_ < srcLineNo) =>
-        target.lineNumber(src.lineNumber)
-        target.columnNumber(src.columnNumber)
-      case _ => // do nothing
-    }
-  }
-
-  private def createLocalForUnresolvedReference(
-    methodScopeNodeId: NewNode,
-    pendingReference: PendingReference
-  ): NewLocal = {
-    val name = pendingReference.variableName
-    val tpe  = pendingReference.tpe
-    val code = pendingReference.referenceNode match {
-      case id: NewIdentifier => id.code
-      case _                 => pendingReference.variableName
-    }
-    val local = AstNodeBuilder.localNodeWithExplicitPositionInfo(name, code, tpe).order(0)
-    diffGraph.addEdge(methodScopeNodeId, local, EdgeTypes.AST)
-    local
+  private def genFileOffsetTable(): Array[Int] = {
+    cdtAst.getRawSignature.toCharArray.zipWithIndex.collect { case ('\n', idx) => idx + 1 }
   }
 
   private def notHandledText(node: IASTNode): String = {

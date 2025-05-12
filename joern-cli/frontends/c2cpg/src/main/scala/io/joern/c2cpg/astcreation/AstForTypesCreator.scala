@@ -8,6 +8,7 @@ import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTAliasDeclaration
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 import io.joern.x2cpg.datastructures.Stack.*
+import io.joern.x2cpg.datastructures.VariableScopeManager
 import io.shiftleft.codepropertygraph.generated.EdgeTypes
 import org.apache.commons.lang3.StringUtils
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPClosureType
@@ -55,9 +56,8 @@ trait AstForTypesCreator { this: AstCreator =>
         val typeDefName = if (name.isEmpty) { safeGetBinding(declarator.getName).map(_.getName).getOrElse("") }
         else { name }
         val tpe                = registerType(typeFor(declarator))
-        val (name_, fullName_) = fileLocalUniqueName(cleanType(typeDefName), fullName(declarator))
-        val fixedFullName      = if (fullName_.isEmpty) name else s"$fullName_.$name"
-        Ast(typeDeclNode(declarator, name_, registerType(fixedFullName), filename, code(d), alias = Option(tpe)))
+        val (name_, fullName_) = scopeLocalUniqueName(cleanType(typeDefName), fullName(declarator), "")
+        Ast(typeDeclNode(declarator, name_, registerType(fullName_), filename, code(d), alias = Option(tpe)))
       case d if parentIsClassDef(d) =>
         val tpe = typeForIASTDeclarator(declaration, declarator, index)
         Ast(memberNode(declarator, name, code(declarator), tpe))
@@ -67,7 +67,7 @@ trait AstForTypesCreator { this: AstCreator =>
         val tpe  = typeForIASTDeclarator(declaration, declarator, index)
         val code = codeForDeclarator(declaration, declarator)
         val node = localNode(declarator, name, code, tpe)
-        scope.addVariable(name, node, tpe, C2CpgScope.ScopeType.BlockScope)
+        scope.addVariable(name, node, tpe, VariableScopeManager.ScopeType.BlockScope)
         Ast(node)
     }
   }
@@ -122,14 +122,13 @@ trait AstForTypesCreator { this: AstCreator =>
   }
 
   protected def astForAliasDeclaration(aliasDeclaration: ICPPASTAliasDeclaration): Ast = {
-    val (name, fullName_) = fileLocalUniqueName(aliasDeclaration.getAlias.toString, fullName(aliasDeclaration))
-    val fixedFullName     = if (fullName_.isEmpty) name else s"$fullName_.$name"
+    val (name, fullName_) = scopeLocalUniqueName(aliasDeclaration.getAlias.toString, fullName(aliasDeclaration), "")
     val mappedName        = registerType(typeFor(aliasDeclaration.getMappingTypeId))
     val typeDeclNode_ =
       typeDeclNode(
         aliasDeclaration,
         name,
-        registerType(fixedFullName),
+        registerType(fullName_),
         fileName(aliasDeclaration),
         code(aliasDeclaration),
         alias = Option(mappedName)

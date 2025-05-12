@@ -1,6 +1,5 @@
 package io.joern.swiftsrc2cpg.astcreation
 
-import io.joern.swiftsrc2cpg.datastructures.*
 import io.joern.swiftsrc2cpg.parser.SwiftNodeSyntax.AccessorDeclSyntax
 import io.joern.swiftsrc2cpg.parser.SwiftNodeSyntax.CodeBlockItemSyntax
 import io.joern.swiftsrc2cpg.parser.SwiftNodeSyntax.DeferStmtSyntax
@@ -9,18 +8,11 @@ import io.joern.swiftsrc2cpg.parser.SwiftNodeSyntax.FunctionDeclSyntax
 import io.joern.swiftsrc2cpg.parser.SwiftNodeSyntax.GuardStmtSyntax
 import io.joern.swiftsrc2cpg.parser.SwiftNodeSyntax.InitializerDeclSyntax
 import io.joern.swiftsrc2cpg.parser.SwiftNodeSyntax.SwiftNode
-import io.joern.x2cpg.AstNodeBuilder.closureBindingNode
-import io.joern.x2cpg.frontendspecific.swiftsrc2cpg.Defines
-import io.joern.x2cpg.utils.IntervalKeyPool
-import io.joern.x2cpg.{Ast, AstNodeBuilder, ValidationMode}
+import io.joern.x2cpg.Ast
+import io.joern.x2cpg.ValidationMode
 import io.shiftleft.codepropertygraph.generated.nodes.NewNode
-import io.shiftleft.codepropertygraph.generated.{EdgeTypes, EvaluationStrategies}
-import io.shiftleft.codepropertygraph.generated.nodes.NewNamespaceBlock
-import io.shiftleft.codepropertygraph.generated.nodes.NewTypeDecl
 import io.shiftleft.codepropertygraph.generated.ControlStructureTypes
 import io.shiftleft.codepropertygraph.generated.PropertyNames
-
-import scala.collection.mutable
 
 object AstCreatorHelper {
 
@@ -34,10 +26,6 @@ object AstCreatorHelper {
 }
 
 trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: AstCreator =>
-
-  private val anonClassKeyPool = new IntervalKeyPool(first = 0, last = Long.MaxValue)
-
-  protected def nextAnonClassName(): String = s"<anon-class>${anonClassKeyPool.next}"
 
   protected def notHandledYet(node: SwiftNode): Ast = {
     val text =
@@ -103,22 +91,27 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: As
     global.usedTypes.putIfAbsent(typeFullName, true)
   }
 
-  protected def generateUnusedVariableName(
-    usedVariableNames: mutable.HashMap[String, Int],
-    variableName: String
-  ): String = {
-    val counter             = usedVariableNames.get(variableName).fold(0)(_ + 1)
-    val currentVariableName = s"${variableName}_$counter"
-    usedVariableNames.put(variableName, counter)
-    currentVariableName
+  protected def scopeLocalUniqueName(targetName: String): String = {
+    val name = if (targetName.nonEmpty) { s"<$targetName>" }
+    else { "<anonymous>" }
+    val key = s"${scope.computeScopePath}:$name"
+    val idx = scopeLocalUniqueNames.getOrElseUpdate(key, 0)
+    scopeLocalUniqueNames.update(key, idx + 1)
+    s"$name$idx"
   }
 
-  private def computeScopePath(stack: Option[ScopeElement]): String =
-    new ScopeElementIterator(stack)
-      .to(Seq)
-      .reverse
-      .collect { case methodScopeElement: MethodScopeElement => methodScopeElement.name }
-      .mkString(":")
+  protected def calcTypeNameAndFullName(name: String): (String, String) = {
+    val fullNamePrefix = s"${parserResult.filename}:${scope.computeScopePath}:"
+    val fullName       = s"$fullNamePrefix$name"
+    (name, fullName)
+  }
+
+  protected def calcMethodNameAndFullName(func: SwiftNode): (String, String) = {
+    val name           = calcMethodName(func)
+    val fullNamePrefix = s"${parserResult.filename}:${scope.computeScopePath}:"
+    val fullName       = s"$fullNamePrefix$name"
+    (name, fullName)
+  }
 
   private def calcMethodName(func: SwiftNode): String = func match {
     case f: FunctionDeclSyntax      => code(f.name)
@@ -126,103 +119,6 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: As
     case d: DeinitializerDeclSyntax => code(d.deinitKeyword)
     case i: InitializerDeclSyntax   => code(i.initKeyword)
     case _                          => nextClosureName()
-  }
-
-  protected def calcTypeNameAndFullName(name: String): (String, String) = {
-    val fullNamePrefix = s"${parserResult.filename}:${computeScopePath(scope.getScopeHead)}:"
-    val fullName       = s"$fullNamePrefix$name"
-    (name, fullName)
-  }
-
-  protected def calcMethodNameAndFullName(func: SwiftNode): (String, String) = {
-    functionNodeToNameAndFullName.get(func) match {
-      case Some(nameAndFullName) => nameAndFullName
-      case None =>
-        val name           = calcMethodName(func)
-        val fullNamePrefix = s"${parserResult.filename}:${computeScopePath(scope.getScopeHead)}:"
-        val fullName       = s"$fullNamePrefix$name"
-        (name, fullName)
-    }
-  }
-
-  protected def createVariableReferenceLinks(): Unit = {
-    val resolvedReferenceIt = scope.resolve(createMethodLocalForUnresolvedReference)
-    val capturedLocals      = mutable.HashMap.empty[String, NewNode]
-
-    resolvedReferenceIt.foreach { case ResolvedReference(variableNodeId, origin) =>
-      var currentScope           = origin.stack
-      var currentReference       = origin.referenceNode
-      var nextReference: NewNode = null
-
-      var done = false
-      while (!done) {
-        val localOrCapturedLocalNodeOption =
-          if (currentScope.get.nameToVariableNode.contains(origin.variableName)) {
-            done = true
-            Option(variableNodeId)
-          } else {
-            currentScope.flatMap {
-              case methodScope: MethodScopeElement
-                  if methodScope.scopeNode.isInstanceOf[NewTypeDecl] || methodScope.scopeNode
-                    .isInstanceOf[NewNamespaceBlock] =>
-                currentScope = Option(Scope.getEnclosingMethodScopeElement(currentScope))
-                None
-              case methodScope: MethodScopeElement =>
-                // We have reached a MethodScope and still did not find a local variable to link to.
-                // For all non local references the CPG format does not allow us to link
-                // directly. Instead we need to create a fake local variable in method
-                // scope and link to this local which itself carries the information
-                // that it is a captured variable. This needs to be done for each
-                // method scope until we reach the originating scope.
-                val closureBindingIdProperty = s"${methodScope.methodFullName}:${origin.variableName}"
-                capturedLocals.updateWith(closureBindingIdProperty) {
-                  case None =>
-                    val methodScopeNode = methodScope.scopeNode
-                    val localNode_ = AstNodeBuilder
-                      .localNodeWithExplicitPositionInfo(
-                        origin.variableName,
-                        origin.variableName,
-                        Defines.Any,
-                        Option(closureBindingIdProperty)
-                      )
-                      .order(0)
-                    diffGraph.addEdge(methodScopeNode, localNode_, EdgeTypes.AST)
-                    val closureBinding = closureBindingNode(
-                      closureBindingIdProperty,
-                      origin.variableName,
-                      EvaluationStrategies.BY_REFERENCE
-                    )
-                    methodScope.capturingRefId.foreach(ref => diffGraph.addEdge(ref, closureBinding, EdgeTypes.CAPTURE))
-                    nextReference = closureBinding
-                    Option(localNode_)
-                  case someLocalNode =>
-                    // When there is already a LOCAL representing the capturing, we do not
-                    // need to process the surrounding scope element as this has already
-                    // been processed.
-                    done = true
-                    someLocalNode
-                }
-              case _: BlockScopeElement =>
-                None
-            }
-          }
-
-        localOrCapturedLocalNodeOption.foreach { localOrCapturedLocalNode =>
-          diffGraph.addEdge(currentReference, localOrCapturedLocalNode, EdgeTypes.REF)
-          currentReference = nextReference
-        }
-        currentScope = currentScope.get.surroundingScope
-      }
-    }
-  }
-
-  private def createMethodLocalForUnresolvedReference(
-    methodScopeNodeId: NewNode,
-    variableName: String
-  ): (NewNode, ScopeType) = {
-    val local = AstNodeBuilder.localNodeWithExplicitPositionInfo(variableName, variableName, Defines.Any).order(0)
-    diffGraph.addEdge(methodScopeNodeId, local, EdgeTypes.AST)
-    (local, MethodScope)
   }
 
 }

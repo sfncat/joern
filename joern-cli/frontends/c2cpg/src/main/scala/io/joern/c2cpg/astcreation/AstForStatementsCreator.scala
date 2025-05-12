@@ -2,6 +2,7 @@ package io.joern.c2cpg.astcreation
 
 import io.joern.c2cpg.parser.CdtParser
 import io.joern.x2cpg.Ast
+import io.joern.x2cpg.datastructures.VariableScopeManager
 import io.shiftleft.codepropertygraph.generated.ControlStructureTypes
 import io.shiftleft.codepropertygraph.generated.nodes.AstNodeNew
 import io.shiftleft.codepropertygraph.generated.DispatchTypes
@@ -86,17 +87,17 @@ trait AstForStatementsCreator { this: AstCreator =>
       val assignmentCode     = s"$localName = $codeString"
       val assignmentCallNode = callNode(astName, assignmentCode, op, op, DispatchTypes.STATIC_DISPATCH, None, Some(tpe))
       val localNameNode      = localNode(astName, localName, localName, tpe)
-      scope.addVariable(localName, localNameNode, tpe, C2CpgScope.ScopeType.BlockScope)
+      scope.addVariable(localName, localNameNode, tpe, VariableScopeManager.ScopeType.BlockScope)
       val localId = identifierNode(astName, code(astName), code(astName), tpe)
       val leftAst = Ast(localId).withRefEdge(localId, localNameNode)
       (assignmentCallNode, localNameNode, leftAst)
     }
 
     val initializer  = init.getOrElse(struct.getInitializer)
-    val tmpName      = fileLocalUniqueName("", "", "tmp")._1
+    val tmpName      = scopeLocalUniqueName("tmp")
     val tpe          = registerType(typeFor(initializer))
     val localTmpNode = localNode(struct, tmpName, tmpName, tpe)
-    scope.addVariable(tmpName, localTmpNode, tpe, C2CpgScope.ScopeType.BlockScope)
+    scope.addVariable(tmpName, localTmpNode, tpe, VariableScopeManager.ScopeType.BlockScope)
 
     val idNode             = identifierNode(struct, tmpName, tmpName, tpe)
     val rhsAst             = astForNode(initializer)
@@ -376,7 +377,7 @@ trait AstForStatementsCreator { this: AstCreator =>
     val idType         = registerType(typeFor(forStmt.getDeclaration))
 
     // iterator assignment:
-    val iteratorName      = fileLocalUniqueName("", "", "iterator")._1
+    val iteratorName      = scopeLocalUniqueName("iterator")
     val iteratorLocalNode = localNode(forStmt, iteratorName, iteratorName, registerType(Defines.Iterator)).order(0)
     val iteratorNode      = identifierNode(forStmt, iteratorName, iteratorName, Defines.Iterator)
     diffGraph.addEdge(blockNode, iteratorLocalNode, EdgeTypes.AST)

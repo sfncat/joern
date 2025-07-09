@@ -3,7 +3,6 @@ package io.joern.php2cpg.astcreation
 import io.joern.php2cpg.astcreation.AstCreator.{NameConstants, TypeConstants, operatorSymbols}
 import io.joern.php2cpg.datastructures.ArrayIndexTracker
 import io.joern.php2cpg.parser.Domain.*
-import io.joern.php2cpg.utils.PhpScopeElement
 import io.joern.x2cpg.Defines.{UnresolvedNamespace, UnresolvedSignature}
 import io.joern.x2cpg.Defines.UnresolvedSignature
 import io.joern.x2cpg.utils.AstPropertiesUtil.RootProperties
@@ -823,7 +822,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode) { 
       case nameExpr: PhpNameExpr =>
         scope
           .lookupVariable(nameExpr.name)
-          .flatMap(_.properties.get(PropertyNames.TYPE_FULL_NAME).map(_.toString))
+          .flatMap(_.properties.get(PropertyNames.TypeFullName).map(_.toString))
           .getOrElse(nameExpr.name)
 
       case expr =>
@@ -888,14 +887,14 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode) { 
     val initArgs      = expr.args.map(astForCallArg)
     val initSignature = s"$UnresolvedSignature(${initArgs.size})"
     val initFullName  = s"$className$MethodDelimiter$ConstructorMethodName"
-    val initCode      = s"$initFullName(${initArgs.map(_.rootCodeOrEmpty).mkString(",")})"
+    val initCode      = s"new $className(${initArgs.map(_.rootCodeOrEmpty).mkString(",")})"
     val maybeTypeHint = scope.resolveIdentifier(className).map(_.name) // consider imported or defined types
     val initCallNode = callNode(
       expr,
       initCode,
       ConstructorMethodName,
       initFullName,
-      DispatchTypes.DYNAMIC_DISPATCH,
+      DispatchTypes.STATIC_DISPATCH,
       Some(initSignature),
       maybeTypeHint.orElse(Some(Defines.Any)) // TODO Review Note: Should the hint be under dynamicTypeHintFullName?
     )

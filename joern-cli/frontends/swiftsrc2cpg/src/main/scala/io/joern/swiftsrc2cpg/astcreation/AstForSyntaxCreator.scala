@@ -1,22 +1,12 @@
 package io.joern.swiftsrc2cpg.astcreation
 
 import io.joern.swiftsrc2cpg.parser.SwiftNodeSyntax.*
-import io.joern.x2cpg.Ast
 import io.joern.x2cpg.datastructures.Stack.*
-import io.joern.x2cpg.ValidationMode
 import io.joern.x2cpg.datastructures.VariableScopeManager
 import io.joern.x2cpg.frontendspecific.swiftsrc2cpg.Defines
-import io.shiftleft.codepropertygraph.generated.EvaluationStrategies
-import io.shiftleft.codepropertygraph.generated.nodes.NewModifier
-import io.shiftleft.codepropertygraph.generated.ModifierTypes
-import io.shiftleft.codepropertygraph.generated.nodes.NewAnnotationParameter
-import io.shiftleft.codepropertygraph.generated.nodes.NewAnnotationParameterAssign
-import io.shiftleft.codepropertygraph.generated.EdgeTypes
-import io.shiftleft.codepropertygraph.generated.nodes.NewIdentifier
-import io.shiftleft.codepropertygraph.generated.DispatchTypes
-import io.shiftleft.codepropertygraph.generated.Operators
-import io.shiftleft.codepropertygraph.generated.nodes.ExpressionNew
-import io.shiftleft.codepropertygraph.generated.PropertyDefaults
+import io.joern.x2cpg.{Ast, ValidationMode}
+import io.shiftleft.codepropertygraph.generated.*
+import io.shiftleft.codepropertygraph.generated.nodes.*
 
 import scala.annotation.unused
 
@@ -44,13 +34,13 @@ trait AstForSyntaxCreator(implicit withSchemaValidation: ValidationMode) { this:
   }
 
   private def astForArrayElementSyntax(node: ArrayElementSyntax): Ast = {
-    astForNodeWithFunctionReference(node.expression)
+    astForNode(node.expression)
   }
 
   private def astForAttributeSyntax(node: AttributeSyntax): Ast = {
     val argumentAsts = node.arguments match {
       case Some(argument) =>
-        val argumentAst    = astForNodeWithFunctionReference(argument)
+        val argumentAst    = astForNode(argument)
         val parameter      = NewAnnotationParameter().code("argument")
         val assign         = NewAnnotationParameterAssign().code(code(argument))
         val assignChildren = List(Ast(parameter), argumentAst)
@@ -97,8 +87,9 @@ trait AstForSyntaxCreator(implicit withSchemaValidation: ValidationMode) { this:
   private def astForClosureParameterClauseSyntax(node: ClosureParameterClauseSyntax): Ast   = notHandledYet(node)
 
   private def astForClosureParameterSyntax(node: ClosureParameterSyntax): Ast = {
-    val name = node.secondName.fold(code(node.firstName))(code)
-    val tpe  = node.`type`.fold(Defines.Any)(t => cleanType(code(t)))
+    val name       = node.secondName.fold(code(node.firstName))(code)
+    val tpe        = node.`type`.fold(Defines.Any)(t => cleanType(code(t)))
+    val isVariadic = node.ellipsis.isDefined
     registerType(tpe)
     val parameterNode =
       parameterInNode(
@@ -106,7 +97,7 @@ trait AstForSyntaxCreator(implicit withSchemaValidation: ValidationMode) { this:
         name,
         code(node).stripSuffix(","),
         node.json("index").num.toInt + 1,
-        false,
+        isVariadic,
         EvaluationStrategies.BY_VALUE,
         Option(tpe)
       )
@@ -135,7 +126,7 @@ trait AstForSyntaxCreator(implicit withSchemaValidation: ValidationMode) { this:
   private def astForClosureSignatureSyntax(node: ClosureSignatureSyntax): Ast = notHandledYet(node)
 
   private def astForCodeBlockItemSyntax(node: CodeBlockItemSyntax): Ast = {
-    astForNodeWithFunctionReferenceAndCall(node.item)
+    astForNode(node.item)
   }
   private def astForCodeBlockSyntax(node: CodeBlockSyntax): Ast = {
     astForNode(node.statements)
@@ -212,20 +203,27 @@ trait AstForSyntaxCreator(implicit withSchemaValidation: ValidationMode) { this:
   private def astForFunctionParameterSyntax(node: FunctionParameterSyntax): Ast = {
     // TODO: handle attributes
     // TODO: handle modifiers
-    // TODO: handle ellipsis
     // TODO: handle defaultValue
-    val name = node.secondName.fold(code(node.firstName))(code)
-    val tpe  = handleTypeAliasInitializer(node.`type`)
+    val label      = code(node.firstName)
+    val name       = node.secondName.fold(label)(code)
+    val tpe        = handleTypeAliasInitializer(node.`type`)
+    val isVariadic = node.ellipsis.isDefined
+
+    val parameterName = node.firstName match {
+      case _: wildcard => name
+      case _           => label
+    }
     val parameterNode =
       parameterInNode(
         node,
-        name,
+        parameterName,
         code(node).stripSuffix(","),
         node.json("index").num.toInt + 1,
-        false,
+        isVariadic,
         EvaluationStrategies.BY_VALUE,
         Option(tpe)
       )
+
     scope.addVariable(name, parameterNode, tpe, VariableScopeManager.ScopeType.MethodScope)
     Ast(parameterNode)
   }
@@ -248,7 +246,7 @@ trait AstForSyntaxCreator(implicit withSchemaValidation: ValidationMode) { this:
   private def astForInheritedTypeSyntax(node: InheritedTypeSyntax): Ast             = notHandledYet(node)
 
   private def astForInitializerClauseSyntax(node: InitializerClauseSyntax): Ast = {
-    astForNodeWithFunctionReference(node.value)
+    astForNode(node.value)
   }
 
   private def astForKeyPathComponentSyntax(node: KeyPathComponentSyntax): Ast                   = notHandledYet(node)
@@ -260,10 +258,10 @@ trait AstForSyntaxCreator(implicit withSchemaValidation: ValidationMode) { this:
     node.label match {
       case Some(label) =>
         val name = code(label)
-        val ast  = astForNodeWithFunctionReference(node.expression)
+        val ast  = astForNode(node.expression)
         ast.root.collect { case i: ExpressionNew => i.argumentName(name) }
         ast
-      case None => astForNodeWithFunctionReference(node.expression)
+      case None => astForNode(node.expression)
     }
   }
 
@@ -285,7 +283,10 @@ trait AstForSyntaxCreator(implicit withSchemaValidation: ValidationMode) { this:
 
   private def astForMultipleTrailingClosureElementSyntax(node: MultipleTrailingClosureElementSyntax): Ast =
     notHandledYet(node)
-  private def astForObjCSelectorPieceSyntax(node: ObjCSelectorPieceSyntax): Ast = notHandledYet(node)
+
+  private def astForObjCSelectorPieceSyntax(node: ObjCSelectorPieceSyntax): Ast =
+    Ast(literalNode(node, code(node), Option(Defines.String)))
+
   private def astForOpaqueReturnTypeOfAttributeArgumentsSyntax(node: OpaqueReturnTypeOfAttributeArgumentsSyntax): Ast =
     notHandledYet(node)
   private def astForOperatorPrecedenceAndTypesSyntax(node: OperatorPrecedenceAndTypesSyntax): Ast = notHandledYet(node)
@@ -354,7 +355,7 @@ trait AstForSyntaxCreator(implicit withSchemaValidation: ValidationMode) { this:
         val blockNode_ = blockNode(node, PropertyDefaults.Code, Defines.Any)
         scope.pushNewBlockScope(blockNode_)
         localAstParentStack.push(blockNode_)
-        val childrenAst = astForNodeWithFunctionReference(head)
+        val childrenAst = astForNode(head)
         localAstParentStack.pop()
         scope.popScope()
         blockAst(blockNode_, List(childrenAst))
@@ -395,7 +396,7 @@ trait AstForSyntaxCreator(implicit withSchemaValidation: ValidationMode) { this:
   private def astForVersionTupleSyntax(node: VersionTupleSyntax): Ast         = notHandledYet(node)
 
   private def astForWhereClauseSyntax(node: WhereClauseSyntax): Ast = {
-    astForNodeWithFunctionReference(node.condition)
+    astForNode(node.condition)
   }
 
   private def astForYieldedExpressionSyntax(node: YieldedExpressionSyntax): Ast               = notHandledYet(node)

@@ -3,7 +3,10 @@ package io.joern.swiftsrc2cpg.passes
 import io.joern.swiftsrc2cpg.Config
 import io.joern.swiftsrc2cpg.astcreation.AstCreator
 import io.joern.swiftsrc2cpg.parser.SwiftJsonParser
+import io.joern.swiftsrc2cpg.parser.SwiftJsonParser.ParseResult
 import io.joern.swiftsrc2cpg.utils.AstGenRunner.AstGenRunnerResult
+import io.joern.swiftsrc2cpg.utils.SwiftTypesProvider
+import io.joern.swiftsrc2cpg.utils.SwiftTypesProvider.SwiftFileLocalTypeMapping
 import io.joern.x2cpg.ValidationMode
 import io.joern.x2cpg.datastructures.Global
 import io.joern.x2cpg.frontendspecific.swiftsrc2cpg.Defines
@@ -23,7 +26,8 @@ class AstCreationPass(cpg: Cpg, astGenRunnerResult: AstGenRunnerResult, config: 
 
   private val logger: Logger = LoggerFactory.getLogger(classOf[AstCreationPass])
 
-  private val global = new Global()
+  private val global  = new Global()
+  private var typeMap = SwiftTypesProvider(config).map(_.retrieveMappings()).getOrElse(Map.empty)
 
   def typesSeen(): List[String] = global.usedTypes.keys().asScala.filterNot(Defines.SwiftTypes.contains).toList
 
@@ -42,13 +46,30 @@ class AstCreationPass(cpg: Cpg, astGenRunnerResult: AstGenRunnerResult, config: 
     }
   }
 
+  private def extractFileLocalTypeMap(parseResult: ParseResult): SwiftFileLocalTypeMapping = {
+    typeMap
+      .collectFirst {
+        // special handling for GitHub Windows and MacOS runner
+        // Windows: C:\Users\RUNNER~1\AppData\Local\Temp\hash\Input\file.swift vs. C:\Users\runneradmin\AppData\Local\Temp\hash\Input\file.swift
+        // macOS: /private/var/folders/y6/hash/T/Input/file.swift vs. /var/folders/y6/hash/T/Input/file.swift
+        case (filename, map) if filename.replace("\\", "/").endsWith(parseResult.filename) => (filename, map)
+      }
+      .map { case (filename, map) =>
+        typeMap = typeMap.removed(filename)
+        map
+      }
+      .getOrElse(Map.empty)
+  }
+
   override def runOnPart(diffGraph: DiffGraphBuilder, input: String): Unit = {
     val ((gotCpg, filename), duration) = TimeUtils.time {
       SwiftJsonParser.readFile(Paths.get(input)) match {
         case Success(parseResult) =>
           report.addReportInfo(parseResult.filename, parseResult.loc, parsed = true)
           Try {
-            val localDiff = new AstCreator(config, global, parseResult).createAst()
+            val fileLocalTypesMap = extractFileLocalTypeMap(parseResult)
+            val astCreator        = new AstCreator(config, global, parseResult, fileLocalTypesMap)
+            val localDiff         = astCreator.createAst()
             diffGraph.absorb(localDiff)
           } match {
             case Failure(exception) =>

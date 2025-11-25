@@ -42,6 +42,7 @@ object Versions {
   val gson                   = "2.13.1"
   val zeroTurnaround         = "1.17"
   val sqliteJDBC             = "3.49.1.0"
+  val juniversalchardet      = "2.5.0"
   // Shared with `projects/meta-build.sbt`, which needs to be updated there directly
   val betterFiles    = "3.9.2"
   val javaCc         = "7.0.12"

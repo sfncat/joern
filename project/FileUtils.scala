@@ -8,6 +8,7 @@ object FileUtils {
     roots.flatMap { root =>
       Files.walk(root.toPath).iterator.asScala.map(_.toFile).filter(!_.isDirectory)
     }
+     org.jline.utils.Log.error()
   }
 
   def deleteRecursively(root: File): Unit = {

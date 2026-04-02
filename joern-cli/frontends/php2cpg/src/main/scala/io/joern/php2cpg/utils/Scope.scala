@@ -31,7 +31,10 @@ class Scope(summary: Map[String, Seq[SymbolSummary]] = Map.empty)
     val mappedNode = scopeNode match {
       case block: BlockScope =>
         val blockFullName = stack.headOption
-          .map { case ScopeElement(node: NamedScope, _) => node.fullName }
+          .map {
+            case ScopeElement(node: NamedScope, _) => node.fullName
+            case _                                 => throw MatchError(scopeNode)
+          }
           .getOrElse("")
         BlockScope(block.block, blockFullName)
       case method: MethodScope =>
@@ -120,16 +123,16 @@ class Scope(summary: Map[String, Seq[SymbolSummary]] = Map.empty)
   }
 
   def getNewVarTmp(varPrefix: String = ""): String = {
-    stack.headOption match {
-      case Some(ScopeElement(namespace: NamespaceScope, _)) =>
-        s"${this.surroundingScopeFullName.getOrElse("<global>")}@$varPrefix${namespace.getNextVarTmp}"
-      case Some(ScopeElement(typeScope: TypeScope, _)) =>
-        s"${this.surroundingScopeFullName.getOrElse("<global>")}@$varPrefix${typeScope.getNextVarTmp}"
-      case Some(ScopeElement(methodScope: MethodScope, _)) =>
-        s"${this.surroundingScopeFullName.getOrElse("<global>")}@$varPrefix${methodScope.getNextVarTmp}"
-      case _ =>
-        s"${this.surroundingScopeFullName.getOrElse("<global>")}@$varPrefix${this.getNextVarTmp}"
-    }
+    stack
+      .collectFirst {
+        case ScopeElement(namespace: NamespaceScope, _) =>
+          s"${this.surroundingScopeFullName.getOrElse("<global>")}@$varPrefix${namespace.getNextVarTmp}"
+        case ScopeElement(typeScope: TypeScope, _) =>
+          s"${this.surroundingScopeFullName.getOrElse("<global>")}@$varPrefix${typeScope.getNextVarTmp}"
+        case ScopeElement(methodScope: MethodScope, _) =>
+          s"${this.surroundingScopeFullName.getOrElse("<global>")}@$varPrefix${methodScope.getNextVarTmp}"
+      }
+      .getOrElse(s"${this.surroundingScopeFullName.getOrElse("<global>")}@$varPrefix${this.getNextVarTmp}")
   }
 
   def addMethodRef(methodRefName: String, methodRef: NewMethodRef): Unit = methodRefsInAst.put(methodRefName, methodRef)
@@ -176,6 +179,13 @@ class Scope(summary: Map[String, Seq[SymbolSummary]] = Map.empty)
   def getEnclosingTypeDecl: Option[NewTypeDecl] =
     stack.map(_.scopeNode).collectFirst { case TypeScope(td, _) => td }
 
+  def getEnclosingParentInfo: Option[(String, String)] =
+    stack.map(_.scopeNode).collectFirst {
+      case MethodScope(mn, _, _, _, _, _, _) => (NodeTypes.METHOD, mn.fullName)
+      case TypeScope(td, _)                  => (NodeTypes.TYPE_DECL, td.fullName)
+      case NamespaceScope(ns, _)             => (NodeTypes.NAMESPACE_BLOCK, ns.fullName)
+    }
+
   def createMethodNameWithSurroundingInformation(methodName: String): String = {
     val namespaces =
       getEnclosingNamespaceNames.filterNot(_ == NamespaceTraversal.globalNamespaceName).reverse.mkString("\\")
@@ -185,7 +195,7 @@ class Scope(summary: Map[String, Seq[SymbolSummary]] = Map.empty)
       .collectFirst {
         case NamespaceScope(nm, _) if nm.name != NamespaceTraversal.globalNamespaceName => s"${nm.name}\\$methodName"
         case TypeScope(td, _) if td.name != NamespaceTraversal.globalNamespaceName      => s"${td.fullName}.$methodName"
-        case MethodScope(nm, _, _, _, _, _) if nm.name != NamespaceTraversal.globalNamespaceName =>
+        case MethodScope(nm, _, _, _, _, _, _) if nm.name != NamespaceTraversal.globalNamespaceName =>
           if (namespaces.isEmpty) {
             s"${nm.fullName}.$methodName"
           } else {
@@ -204,15 +214,15 @@ class Scope(summary: Map[String, Seq[SymbolSummary]] = Map.empty)
   def getSurroundingMethodsForArrowClosure: List[MethodScope] = {
     val methods = mutable.ArrayBuffer[MethodScope]()
     stack
-      .collect { case scopeEl @ ScopeElement(_: MethodScope, _) =>
-        scopeEl
+      .collect { case scopeEl @ ScopeElement(methodScope: MethodScope, _) =>
+        methodScope
       }
       .takeWhile {
-        case ScopeElement(ms: MethodScope, _) if ms.isArrowFunc =>
-          methods.addOne(ms)
+        case methodScope if methodScope.isArrowFunc =>
+          methods.addOne(methodScope)
           true
-        case ScopeElement(ms: MethodScope, _) =>
-          methods.addOne(ms)
+        case methodScope =>
+          methods.addOne(methodScope)
           false
       }
 

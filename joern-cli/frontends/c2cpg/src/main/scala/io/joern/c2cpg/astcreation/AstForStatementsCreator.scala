@@ -4,14 +4,7 @@ import io.joern.c2cpg.parser.CdtParser
 import io.joern.x2cpg.Ast
 import io.joern.x2cpg.datastructures.VariableScopeManager
 import io.shiftleft.codepropertygraph.generated.*
-import io.shiftleft.codepropertygraph.generated.nodes.{
-  AstNodeNew,
-  NewBlock,
-  NewCall,
-  NewIdentifier,
-  NewLiteral,
-  NewLocal
-}
+import io.shiftleft.codepropertygraph.generated.nodes.*
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.core.dom.ast.gnu.IGNUASTGotoStatement
@@ -308,7 +301,7 @@ trait AstForStatementsCreator { this: AstCreator =>
     val code                 = statement.getRawSignature
     val file                 = Paths.get(statement.getContainingFilename)
     val asts = if (isFromMacroExpansion) {
-      new CdtParser(config, headerFileFinder, None, global).parse(code, file) match {
+      new CdtParser(config, headerFileFinder, None).parse(code, file, accumulator) match {
         case Some(translationUnit: IASTTranslationUnit) =>
           translationUnit.getDeclarations.toIndexedSeq.flatMap(astsForDeclaration)
         case None =>
@@ -472,7 +465,7 @@ trait AstForStatementsCreator { this: AstCreator =>
         s"${Defines.Iterator}.next:${Defines.Any}()",
         DispatchTypes.DYNAMIC_DISPATCH,
         Some(s"${Defines.Any}()"),
-        Some(registerType(Defines.Any))
+        Some(Defines.Any)
       )
 
     val nextReceiverNode = identifierNode(forStmt, iteratorName, iteratorName, Defines.Iterator)

@@ -1,6 +1,7 @@
 /* reads version declarations from /build.sbt so that we can declare them in one place */
 object Versions {
   val cpg = parseVersion("cpgVersion")
+  val asm            = "9.9.1"
   // Dont upgrade antlr to 4.10 or above since those versions require java 11 or higher which
   // causes problems upstreams.
   val antlr      = "4.7.2"
@@ -19,8 +20,7 @@ object Versions {
   val ghidra                 = "11.4_f331b5bbea-202504251242"
   val gradleTooling          = "8.3"
   val jacksonDatabind        = "2.17.0"
-  val javaParser             = "3.27.0"
-  val jlhttp                 = "3.1"
+  val javaParser             = "3.28.0"
   val jRuby                  = "9.4.9.0"
   val json4s                 = "4.0.7"
   val lombok                 = "1.18.42"
@@ -31,7 +31,7 @@ object Versions {
   val requests               = "0.8.0"
   val scalaParallel          = "1.0.4"
   val scalaParserCombinators = "2.4.0"
-  val scalaReplPP            = "0.6.1"
+  val scalaReplPP            = "0.6.2"
   val scalatest              = "3.2.18"
   val scopt                  = "4.1.0"
   val semverParser           = "0.0.6"
@@ -51,7 +51,6 @@ object Versions {
   val typeSafeConfig = "1.4.3"
   val versionSort    = "1.0.11"
   val zip4j          = "2.11.5"
-  val asm            = "9.7.1"
 
   private def parseVersion(key: String): String = {
     val versionRegexp = s""".*val $key[ ]+=[ ]?"(.*?)"""".r

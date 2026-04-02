@@ -1,8 +1,8 @@
 name                     := "joern"
 ThisBuild / organization := "io.joern"
-ThisBuild / scalaVersion := "3.6.4"
+ThisBuild / scalaVersion := "3.7.4"
 
-val cpgVersion = "1.7.51"
+val cpgVersion = "1.7.62"
 
 lazy val joerncli          = Projects.joerncli
 lazy val querydb           = Projects.querydb
@@ -61,6 +61,7 @@ ThisBuild / libraryDependencies ++= Seq(
 ThisBuild / compile / javacOptions ++= Seq(
   "-g", // debug symbols
   "-Xlint",
+  "-proc:none",
   "--release=11"
 ) ++ {
   // Require Java 13+ due to FileSystems.newFileSystem(Path) API used in project/FileUtils.scala
@@ -73,9 +74,12 @@ ThisBuild / scalacOptions ++= Seq(
   "-deprecation", // Emit warning and location for usages of deprecated APIs.
   "--release",
   "11",
+  "-Xfatal-warnings",
+  "-feature",
   "-Wshadow:type-parameter-shadow",
   "-no-indent",
-  "-old-syntax"
+  "-old-syntax",
+  "-Wconf:msg=Implicit parameters should be provided with a `using` clause:s",
 )
 
 lazy val createDistribution = taskKey[File]("Create a complete Joern distribution")
